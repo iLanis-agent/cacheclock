@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CacheClock - is this HTTP response still fresh?</title>
+<meta name="description" content="HTTP cache freshness calculator per RFC 9111: paste response headers, see if a cache may store it, how long it is fresh and its age now. Checked against http-cache-semantics.">
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; background:#0e1a13; color:#f3ede6; line-height:1.6; }
+  .wrap { max-width:680px; margin:0 auto; padding:48px 20px 60px; }
+  .logo { font-size:46px; font-weight:800; } .logo span { color:#86efac; }
+  .tag { font-size:19px; margin-top:10px; color:#ded5ca; }
+  .cta { display:inline-block; margin-top:26px; background:#86efac; color:#0e1a13; font-weight:700; padding:14px 30px; border-radius:12px; text-decoration:none; }
+  h2 { font-size:21px; margin:40px 0 10px; } li { color:#b9aea1; margin-bottom:8px; } ul { margin-left:20px; }
+  .demo { margin-top:26px; background:#17291d; border-radius:14px; padding:18px; } .demo b { color:#86efac; }
+  footer { margin-top:50px; font-size:13px; color:#8c8174; } a { color:#86efac; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">Cache<span>Clock</span></div>
+  <div class="tag">max-age, s-maxage, Expires, Age, no-cache: what does the cache actually do?</div>
+  <a class="cta" href="app.html">Open the app</a>
+  <div class="demo"><b>Cache-Control: public, max-age=600</b> with <b>Age: 120</b> and a response that took 1 s: initial age 121 s. Stored for 5 more minutes the age is <b>421 s</b>, so <b>179 s</b> are left before it goes stale.</div>
+  <h2>What it does</h2>
+  <ul><li>Can a shared or private cache store it? Why not, if not</li><li>Freshness lifetime from s-maxage, max-age, Expires or the 10% heuristic</li><li>Age worked out the RFC 9111 way, with a fresh-versus-age bar</li><li>no-cache, must-revalidate, no-store and Authorization handled</li></ul>
+  <footer>Models RFC 9111 rules only, not Vary, request directives or stale-while-revalidate. Static, client-side, nothing stored. <a href="https://github.com/iLanis-agent/cacheclock">Source</a></footer>
+</div>
+</body>
+</html>
