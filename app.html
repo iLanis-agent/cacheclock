@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CacheClock - is this HTTP response still fresh?</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; background:#0e1a13; color:#f3ede6; line-height:1.5; }
+  .wrap { max-width:700px; margin:0 auto; padding:26px 16px 50px; }
+  h1 { font-size:28px; } h1 span { color:#86efac; }
+  .sub { color:#b5aa9c; margin:6px 0 16px; }
+  .card { background:#17291d; border-radius:14px; padding:14px; margin-bottom:12px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; }
+  label { font-size:12px; color:#b5aa9c; display:block; margin-bottom:3px; }
+  input,select { width:100%; background:#0e1a13; color:#f3ede6; border:1px solid #574f48; border-radius:8px; padding:8px; font-size:15px; font-family:inherit; }
+  button { background:#1f6b3a; color:#f3ede6; border:0; padding:8px 14px; border-radius:8px; cursor:pointer; font-size:14px; margin-right:6px; margin-top:10px; }
+  table { width:100%; border-collapse:collapse; } td,th { text-align:left; padding:8px 4px; border-bottom:1px solid #433c36; } th { font-size:12px; color:#b5aa9c; font-weight:600; }
+  td.v { font-size:22px; font-weight:800; color:#86efac; } tr.me td.v { color:#f3ede6; }
+  .stats { display:flex; gap:22px; flex-wrap:wrap; margin-top:12px; } .stats b { display:block; font-size:20px; } .muted { color:#b5aa9c; font-size:13px; }
+  .err { color:#ff9c8a; } .note { font-size:12.5px; color:#8c8174; margin-top:6px; }
+
+  td.v { font-size:17px; } td, th { font-size:14px; } .bar { height:10px; background:#0e1a13; border-radius:6px; overflow:hidden; margin-top:6px; } .bar i { display:block; height:100%; background:#86efac; } .bar i.over { background:#ff7b72; } .no { color:#ff9c8a; }
+  .cb { display:inline-flex; align-items:center; gap:4px; margin-right:12px; font-size:14px; color:#f3ede6; } .cb input { width:auto; } .big { font-family:monospace; font-size:26px; font-weight:800; color:#86efac; } td.v.m { font-family:monospace; }
+  textarea { width:100%; background:#0e1a13; color:#f3ede6; border:1px solid #574f48; border-radius:8px; padding:8px; font-size:14px; font-family:monospace; min-height:110px; } .ok { color:#86efac; font-weight:700; } .no { color:#ff9c8a; } td.m { font-family:monospace; } .chip { display:inline-block; font-family:monospace; background:#0e1a13; border-radius:6px; padding:2px 6px; margin:2px 4px 2px 0; }
+  textarea { width:100%; background:#0e1a13; color:#f3ede6; border:1px solid #574f48; border-radius:8px; padding:8px; font-size:13px; font-family:monospace; min-height:130px; } .badge { display:inline-block; font-weight:800; padding:4px 12px; border-radius:20px; background:#0e1a13; } .bar { height:14px; background:#0e1a13; border-radius:8px; position:relative; margin:12px 0 6px; overflow:hidden; } .bar i.f { position:absolute; left:0; top:0; bottom:0; background:#2f9e5b; } .bar i.n { position:absolute; top:0; bottom:0; width:3px; background:#fff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Cache<span>Clock</span></h1>
+  <div class="sub">Paste response headers. See if a cache may store the response, how long it stays fresh, and what its age is right now.</div>
+  <div class="card">
+    <label>Response headers (Cache-Control, Expires, Date, Age, Last-Modified)</label>
+    <textarea id="h" spellcheck="false">Cache-Control: public, max-age=600
+Date: Sat, 03 Oct 2026 12:00:00 GMT
+Age: 120
+Last-Modified: Fri, 02 Oct 2026 08:00:00 GMT</textarea>
+    <button id="p1">max-age + Age</button><button id="p2">no Cache-Control</button><button id="p3">no-cache</button><button id="p4">s-maxage</button><button id="p5">private</button><button id="p6">no-store</button><button id="p7">Expires only</button>
+    <div class="grid" style="margin-top:10px">
+      <div><label>Status code</label><input id="st" value="200"></div>
+      <div><label>Cache type</label><select id="sh"><option value="0">Private (browser)</option><option value="1">Shared (CDN, proxy)</option></select></div>
+      <div><label>Request had Authorization</label><select id="au"><option value="0">No</option><option value="1">Yes</option></select></div>
+      <div><label>Request to response took (s)</label><input id="dl" value="1"></div>
+      <div><label>Response arrived this many s after its Date</label><input id="sk" value="1"></div>
+      <div><label>Stored for (s)</label><input id="nw" value="300"></div>
+    </div>
+    <div id="err" class="err"></div>
+  </div>
+  <div class="card"><div id="out"></div></div>
+  <div class="note">Rules follow RFC 9111. Storing (section 3): no-store blocks; private blocks a shared cache; Authorization blocks a shared cache unless public, must-revalidate or s-maxage is present; something must allow storing (public, max-age, Expires, s-maxage for shared, a private directive for a private cache, or a status that is heuristically cacheable: 200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, 501). Freshness lifetime (4.2.1): s-maxage for shared caches, else max-age, else Expires minus Date, else a heuristic: 10% of the time since Last-Modified, which the RFC calls typical and does not require. Age (4.2.3): apparent age is response time minus Date (never below 0), corrected age is the Age header plus the request-to-response delay, the larger one is the initial age, and the current age adds the time stored. A response is fresh while lifetime is greater than age. no-cache means a stored copy is reused only after revalidation; must-revalidate forbids serving it stale. Invalid max-age values and invalid Expires dates are treated as stale. If a directive appears twice this page uses the first and says so. Real browsers and CDNs add their own rules (for example the Vary header, request directives, stale-while-revalidate, immutable), which this page does not model. 308 in the heuristic status list comes from RFC 9110 and I could not read that section as text. Runs in your browser, nothing stored.</div>
+</div>
+<script src="engine.js"></script>
+<script>
+(function () {
+  var C = window.CacheClock, $ = function (i) { return document.getElementById(i); };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function dur(s) { s = Math.round(s); var neg = s < 0; s = Math.abs(s); var out; if (s < 90) out = s + ' s'; else if (s < 5400) out = (s / 60).toFixed(1).replace(/\.0$/, '') + ' min'; else if (s < 172800) out = (s / 3600).toFixed(1).replace(/\.0$/, '') + ' h'; else out = (s / 86400).toFixed(1).replace(/\.0$/, '') + ' days'; return (neg ? '-' : '') + out; }
+  function headers(txt) { var h = {}; txt.split(/\r?\n/).forEach(function (l) { var m = /^\s*([A-Za-z-]+)\s*:\s*(.*?)\s*$/.exec(l); if (m) { var k = m[1].toLowerCase(); if (h[k] === undefined) h[k] = m[2]; else h[k] += (k === 'cache-control' ? ', ' : '') ; } }); return h; }
+  function num(id) { var v = parseFloat($(id).value); return isNaN(v) ? null : v; }
+  function run() {
+    var h = headers($('h').value), st = parseInt($('st').value, 10), dl = num('dl'), sk = num('sk'), nw = num('nw');
+    if (isNaN(st) || dl === null || sk === null || nw === null || dl < 0 || nw < 0) { $('err').textContent = 'Check the numbers: status code, delay and stored time must be numbers, not negative.'; $('out').innerHTML = ''; return; }
+    var date = h['date'] === undefined ? null : h['date'], dms = date ? Date.parse(date) : NaN;
+    if (date && isNaN(dms)) { $('err').textContent = 'The Date header is not a valid HTTP date. Example: Sat, 03 Oct 2026 12:00:00 GMT'; $('out').innerHTML = ''; return; }
+    $('err').textContent = '';
+    var base = date ? dms : Date.UTC(2026, 0, 1), rt = base + sk * 1000, rq = rt - dl * 1000;
+    var ageH = h['age'] === undefined ? null : parseInt(h['age'], 10);
+    var r = C.evaluate({ status: st, shared: $('sh').value === '1', hasAuth: $('au').value === '1', cacheControl: h['cache-control'] || '', expires: h['expires'] === undefined ? null : h['expires'], date: date, lastModified: h['last-modified'] === undefined ? null : h['last-modified'], age: ageH === null || isNaN(ageH) ? null : ageH, requestTime: rq, responseTime: rt, now: rt + nw * 1000 });
+    var col = r.state === 'fresh' ? 'ok' : r.state === 'not stored' ? 'no' : 'muted', o = '';
+    o += '<div><span class="badge ' + col + '">' + esc(r.state === 'revalidate' ? 'Stored, must revalidate before reuse' : r.state === 'fresh' ? 'Fresh: can be served without asking' : r.state === 'not stored' ? 'Not stored' : r.state === 'stale: must revalidate' ? 'Stale: must revalidate' : 'Stale: needs revalidation or a fresh fetch') + '</span></div>';
+    r.why.forEach(function (w) { o += '<div class="no" style="margin-top:6px">' + esc(w) + '</div>'; });
+    r.notes.forEach(function (w) { o += '<div class="muted" style="margin-top:6px">' + esc(w) + '</div>'; });
+    if (r.storable) {
+      o += '<div class="stats"><div><b>' + dur(r.lifetime) + '</b>freshness lifetime</div><div><b>' + dur(r.currentAge) + '</b>current age</div><div><b>' + (r.remaining > 0 ? dur(r.remaining) : 'none') + '</b>' + (r.remaining > 0 ? 'left until stale' : 'fresh time left') + '</div></div>';
+      var tot = Math.max(r.lifetime, r.currentAge, 1), fw = Math.min(100, r.lifetime / tot * 100), np = Math.min(100, r.currentAge / tot * 100);
+      o += '<div class="bar"><i class="f" style="width:' + fw + '%"></i><i class="n" style="left:' + Math.min(99.5, np) + '%"></i></div><div class="muted">Green is the freshness lifetime, the white line is the current age.</div>';
+      o += '<table style="margin-top:10px"><tr><td>Lifetime from</td><td class="m">' + esc(r.source) + '</td></tr><tr><td>Apparent age</td><td class="m">' + dur(r.apparentAge) + '</td></tr><tr><td>Corrected age (Age + delay)</td><td class="m">' + dur(r.correctedAge) + '</td></tr><tr><td>Initial age (larger of the two)</td><td class="m">' + dur(r.initialAge) + '</td></tr><tr><td>Time stored</td><td class="m">' + dur(r.residentTime) + '</td></tr></table>';
+    }
+    $('out').innerHTML = o;
+  }
+  var P = { p1: 'Cache-Control: public, max-age=600\nDate: Sat, 03 Oct 2026 12:00:00 GMT\nAge: 120\nLast-Modified: Fri, 02 Oct 2026 08:00:00 GMT', p2: 'Date: Sat, 03 Oct 2026 12:00:00 GMT\nLast-Modified: Sat, 23 Sep 2026 12:00:00 GMT', p3: 'Cache-Control: no-cache, max-age=600\nDate: Sat, 03 Oct 2026 12:00:00 GMT', p4: 'Cache-Control: max-age=60, s-maxage=3600\nDate: Sat, 03 Oct 2026 12:00:00 GMT', p5: 'Cache-Control: private, max-age=600\nDate: Sat, 03 Oct 2026 12:00:00 GMT', p6: 'Cache-Control: no-store\nDate: Sat, 03 Oct 2026 12:00:00 GMT', p7: 'Expires: Sat, 03 Oct 2026 12:30:00 GMT\nDate: Sat, 03 Oct 2026 12:00:00 GMT' };
+  Object.keys(P).forEach(function (k) { $(k).onclick = function () { $('h').value = P[k]; run(); }; });
+  ['h', 'st', 'dl', 'sk', 'nw'].forEach(function (i) { $(i).oninput = run; }); $('sh').onchange = $('au').onchange = run;
+  run();
+})();
+</script>
+</body>
+</html>
